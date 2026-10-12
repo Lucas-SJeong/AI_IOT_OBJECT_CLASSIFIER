@@ -17,8 +17,8 @@ venv/
 # Log files
 *.log
 
-# OS & Editor files
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
+# Node & Open-Slide artifacts
+node_modules/
+dist/
+.open-slide/
+
