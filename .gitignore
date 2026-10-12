@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C / C++ build artifacts
+*.o
+*.obj
+iotserver/build/*
+!iotserver/build/.gitkeep
+
+# Virtual environments
+iotserver/venv/
+venv/
+.venv/
+
+# Log files
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

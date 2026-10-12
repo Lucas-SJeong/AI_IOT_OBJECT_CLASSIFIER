@@ -1,0 +1,295 @@
+
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>스마트 팩토리 실시간 공정 관제</title>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --border: #334155;
+      --text: #f8fafc; --sub: #94a3b8;
+      --green: #22c55e; --red: #ef4444; --yellow: #eab308; --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+
+    /* ESTOP 긴급 배너 */
+    #estop-banner {
+      display: none; background: var(--red); color: white; padding: 14px;
+      font-size: 18px; font-weight: 800; text-align: center; border-radius: 8px;
+      margin-bottom: 20px; animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; } }
+
+    /* 4대 노드 상태 바 */
+    .node-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+    .node-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 15px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .node-name { font-weight: 700; font-size: 15px; }
+    .node-desc { font-size: 12px; color: var(--sub); }
+    .status-badge {
+      padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .badge-online { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .badge-offline { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid var(--red); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot-offline { background: var(--red); }
+
+    /* 메인 컨테이너 */
+    .main-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
+
+    /* 카메라 뷰 영역 */
+    .cam-box {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 15px; display: flex; flex-direction: column;
+    }
+    .cam-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .cam-wrapper {
+      position: relative; width: 100%; height: 360px; background: #000;
+      border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center;
+    }
+    .cam-wrapper img { width: 100%; height: 100%; object-fit: contain; }
+    .cam-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(15, 23, 42, 0.85); display: none; flex-direction: column;
+      align-items: center; justify-content: center; color: var(--red); font-weight: 700;
+    }
+    .live-tag {
+      background: var(--red); color: white; padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 800; letter-spacing: 1px;
+    }
+
+    /* 공정 FSM 및 제어 */
+    .ctrl-box {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 15px; display: flex; flex-direction: column; gap: 15px;
+    }
+    .fsm-state-display {
+      text-align: center; padding: 20px; background: #0f172a; border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .fsm-title { font-size: 13px; color: var(--sub); text-transform: uppercase; margin-bottom: 5px; }
+    .fsm-state { font-size: 32px; font-weight: 900; letter-spacing: 2px; }
+    
+    /* 공정 단계 파이프라인 */
+    .pipeline { display: flex; justify-content: space-between; margin-top: 10px; }
+    .step {
+      flex: 1; text-align: center; font-size: 12px; padding: 8px 4px;
+      background: #1e293b; border-bottom: 3px solid var(--border); color: var(--sub);
+    }
+    .step.active { border-bottom-color: var(--blue); color: var(--text); font-weight: 700; }
+    .step.pass { border-bottom-color: var(--green); color: var(--green); }
+    .step.fail { border-bottom-color: var(--red); color: var(--red); }
+
+    /* 로그 터미널 */
+    .log-box {
+      margin-top: 20px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 15px;
+    }
+    .log-terminal {
+      background: #000; height: 150px; border-radius: 6px; padding: 10px;
+      font-family: monospace; font-size: 12px; overflow-y: auto; color: #a5b4fc;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ESTOP 비상 알림 배너 -->
+  <div id="estop-banner">🚨 EMERGENCY STOP ACTUATED - SYSTEM LOCKED 🚨</div>
+
+  <!-- 4대 노드 연결 상태 매트릭스 -->
+  <div class="node-grid">
+    <div class="node-card">
+      <div>
+        <div class="node-name">T8_CTRL</div>
+        <div class="node-desc">중앙 공정 제어기 (FSM)</div>
+      </div>
+      <div id="badge-ctrl" class="status-badge badge-offline"><span class="dot dot-offline"></span>OFFLINE</div>
+    </div>
+    <div class="node-card">
+      <div>
+        <div class="node-name">T8_HMI</div>
+        <div class="node-desc">작업자 패널 (Bluetooth)</div>
+      </div>
+      <div id="badge-hmi" class="status-badge badge-offline"><span class="dot dot-offline"></span>OFFLINE</div>
+    </div>
+    <div class="node-card">
+      <div>
+        <div class="node-name">T8_MOTION</div>
+        <div class="node-desc">서보 구동 노드 (Wi-Fi ESP-01)</div>
+      </div>
+      <div id="badge-motion" class="status-badge badge-offline"><span class="dot dot-offline"></span>OFFLINE</div>
+    </div>
+    <div class="node-card">
+      <div>
+        <div class="node-name">T8_VISION</div>
+        <div class="node-desc">AI 비전 검사 노드</div>
+      </div>
+      <div id="badge-vision" class="status-badge badge-offline"><span class="dot dot-offline"></span>OFFLINE</div>
+    </div>
+  </div>
+
+  <!-- 메인 관제: 비전 뷰 & 공정 상태 -->
+  <div class="main-grid">
+    
+    <!-- 비전 카메라 뷰 -->
+    <div class="cam-box">
+      <div class="cam-header">
+        <span style="font-weight: 700;">VISION FEED</span>
+        <span id="cam-status-tag" class="live-tag">LIVE</span>
+      </div>
+      <div class="cam-wrapper">
+        <img id="video-stream" src="/video_feed" alt="Camera Feed" onerror="handleCamError()" onload="handleCamSuccess()">
+        <div id="cam-offline-overlay" class="cam-overlay">
+          <svg width="40" height="40" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+          <p style="margin-top: 10px;">카메라 피드 통신 두절 (T8_VISION OFFLINE)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 공정 상태 및 제어 FSM -->
+    <div class="ctrl-box">
+      <div class="fsm-state-display">
+        <div class="fsm-title">Current Machine State</div>
+        <div id="fsm-state-text" class="fsm-state" style="color: var(--blue);">UNKNOWN</div>
+      </div>
+
+      <!-- 공정 단계 시각화 바 -->
+      <div class="pipeline">
+        <div id="step-idle" class="step">1. READY</div>
+        <div id="step-work" class="step">2. WORKING</div>
+        <div id="step-inspect" class="step">3. INSPECTING</div>
+        <div id="step-result" class="step">4. RESULT</div>
+      </div>
+
+      <div style="margin-top: auto; font-size: 13px; color: var(--sub); line-height: 1.6;">
+        <p>• <b>TRAY POS:</b> <span id="val-tray" style="color: var(--text);">0</span>%</p>
+        <p>• <b>MODE:</b> <span id="val-mode" style="color: var(--text);">AUTO</span></p>
+        <p>• <b>LAST EVENT:</b> <span id="val-last-event" style="color: var(--text);">-</span></p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 실시간 시스템 로그 -->
+  <div class="log-box">
+    <div style="font-weight: 700; margin-bottom: 8px;">실시간 라우팅 로그</div>
+    <div id="log-terminal" class="log-terminal"></div>
+  </div>
+
+  <script>
+    // 노드 상태 뱃지 갱신 헬퍼
+    function updateBadge(id, isOnline) {
+      const el = document.getElementById(id);
+      if (isOnline) {
+        el.className = 'status-badge badge-online';
+        el.innerHTML = '<span class="dot dot-online"></span>ONLINE';
+      } else {
+        el.className = 'status-badge badge-offline';
+        el.innerHTML = '<span class="dot dot-offline"></span>OFFLINE';
+      }
+    }
+
+    // 카메라 에러/연결 처리
+    function handleCamError() {
+      document.getElementById('cam-offline-overlay').style.display = 'flex';
+      document.getElementById('cam-status-tag').style.background = '#64748b';
+      document.getElementById('cam-status-tag').innerText = 'OFFLINE';
+    }
+    function handleCamSuccess() {
+      document.getElementById('cam-offline-overlay').style.display = 'none';
+      document.getElementById('cam-status-tag').style.background = 'var(--red)';
+      document.getElementById('cam-status-tag').innerText = 'LIVE';
+    }
+
+    // 주기적 상태 폴링 (1초)
+    async function pollStatus() {
+      try {
+        // 1. 노드 연결 상태 조회 (/api/devices)
+        const devRes = await fetch('/api/devices');
+        if (devRes.ok) {
+          const devices = await devRes.json();
+          // devices = ["T8_WEB", "T8_CTRL", "T8_HMI", "T8_VISION"] 형태 매핑
+          updateBadge('badge-ctrl', devices.includes('T8_CTRL'));
+          updateBadge('badge-hmi', devices.includes('T8_HMI'));
+          updateBadge('badge-motion', devices.includes('T8_MOTION'));
+          updateBadge('badge-vision', devices.includes('T8_VISION'));
+
+          // VISION 노드가 꺼져있으면 카메라 오버레이 강제 활성화
+          if (!devices.includes('T8_VISION')) {
+            handleCamError();
+          }
+        }
+
+        // 2. FSM 공정 상태 조회 (/api/ctrl/status)
+        const ctrlRes = await fetch('/api/ctrl/status');
+        if (ctrlRes.ok) {
+          const ctrl = await ctrlRes.json();
+          const state = ctrl.state || 'UNKNOWN';
+          const stateEl = document.getElementById('fsm-state-text');
+          const estopBanner = document.getElementById('estop-banner');
+
+          stateEl.innerText = state;
+
+          // 모든 단계 클래스 초기화
+          ['step-idle', 'step-work', 'step-inspect', 'step-result'].forEach(s => {
+            document.getElementById(s).className = 'step';
+          });
+
+          // 상태별 색상 및 파이프라인 단계 매핑
+          if (state === 'ESTOP') {
+            stateEl.style.color = 'var(--red)';
+            estopBanner.style.display = 'block';
+          } else {
+            estopBanner.style.display = 'none';
+            if (state === 'IDLE' || state === 'READY') {
+              stateEl.style.color = 'var(--blue)';
+              document.getElementById('step-idle').className = 'step active';
+            } else if (state === 'WORKING') {
+              stateEl.style.color = 'var(--yellow)';
+              document.getElementById('step-work').className = 'step active';
+            } else if (state === 'INSPECTING') {
+              stateEl.style.color = '#a855f7';
+              document.getElementById('step-inspect').className = 'step active';
+            } else if (state === 'PASS') {
+              stateEl.style.color = 'var(--green)';
+              const r = document.getElementById('step-result');
+              r.className = 'step pass';
+              r.innerText = '4. PASS';
+            } else if (state === 'FAIL') {
+              stateEl.style.color = 'var(--red)';
+              const r = document.getElementById('step-result');
+              r.className = 'step fail';
+              r.innerText = '4. FAIL';
+            }
+          }
+
+          if (ctrl.tray !== undefined) document.getElementById('val-tray').innerText = ctrl.tray;
+          if (ctrl.mode) document.getElementById('val-mode').innerText = ctrl.mode;
+        }
+
+        // 3. 실시간 로그 조회 (/api/logs)
+        const logRes = await fetch('/api/logs');
+        if (logRes.ok) {
+          const logs = await logRes.json();
+          const term = document.getElementById('log-terminal');
+          term.innerHTML = logs.map(line => `<div>${line}</div>`).join('');
+          term.scrollTop = term.scrollHeight;
+        }
+
+      } catch (err) {
+        console.error("Dashboard Poll Error:", err);
+      }
+    }
+
+    // 1초마다 갱신
+    setInterval(pollStatus, 1000);
+    pollStatus();
+  </script>
+</body>
+</html>
