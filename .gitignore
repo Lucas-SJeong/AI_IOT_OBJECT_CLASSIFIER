@@ -33,3 +33,12 @@ Thumbs.db
 # STM32CubeIDE build output
 **/Debug/
 **/Release/
+
+# C / Linux build output
+*.o
+*.out
+
+# Temporary files
+*.log
+*.swp
+*~
