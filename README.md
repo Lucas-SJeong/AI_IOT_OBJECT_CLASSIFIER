@@ -1,5 +1,7 @@
 # Smart Factory AI Vision Quality Inspection & Automated Sorting System (Project T8)
 
+> 🌐 **Language**: **[English](./README.md)** | [한국어](./README.ko.md)
+
 An end-to-end industrial IoT & Edge AI automation system designed for real-time product quality inspection and physical sorting. Built on a distributed heterogeneous architecture combining **Dual STM32F4 Microcontrollers**, **NVIDIA Jetson Nano (YOLOv8 Edge AI)**, and **Raspberry Pi 4 (C TCP Message Broker, Central FSM Controller, and FastAPI Web SCADA)**.
 
 ---
@@ -100,7 +102,8 @@ iot_classifier/
 │           └── esp.c                 # ESP-01 AT command driver & +IPD state-machine parser
 │
 ├── .gitignore
-└── README.md
+├── README.md                         # Project documentation (English)
+└── README.ko.md                      # Project documentation (Korean)
 ```
 
 ---
