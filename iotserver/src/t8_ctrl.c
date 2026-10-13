@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <signal.h>
+#include <sys/time.h>
 #include "protocol.h"
 #include "db_manager.h"
 
@@ -14,6 +15,12 @@ static int broker_sock = -1;
 static char current_state[32] = STATE_READY;
 static char current_mode[32] = MODE_AUTO;
 static int tray_percent = 90;
+
+static long long get_current_time_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)tv.tv_sec * 1000 + (tv.tv_usec / 1000);
+}
 
 void send_to_broker(const char* packet) {
     if (broker_sock >= 0) {
@@ -159,17 +166,41 @@ void parse_incoming_event(const char* raw_packet) {
 
     // 7. 트레이 각도 제어 (가변저항 입력 또는 웹 소프트웨어 제어)
     if (strncmp(cmd, "TRAY@", 5) == 0) {
-        tray_percent = atoi(cmd + 5);
-        if (tray_percent < 0) tray_percent = 0;
-        if (tray_percent > 180) tray_percent = 180;
+        int incoming_angle = atoi(cmd + 5);
+        if (incoming_angle < 0) incoming_angle = 0;
+        if (incoming_angle > 180) incoming_angle = 180;
+
+        // [해결 1] 모션 보드(T8_MOTION) 자신이 보낸 피드백 패킷은 모션으로 재전송 금지 (에코 무한루프 차단)
+        if (strcmp(from_id, CLIENT_MOTION) == 0) {
+            tray_percent = incoming_angle;
+            char web_tray[64];
+            snprintf(web_tray, sizeof(web_tray), "[%s]TRAY@%d\n", CLIENT_WEB, tray_percent);
+            send_to_broker(web_tray); // 웹 대시보드 동기화만 수행
+            return;
+        }
+
+        // [해결 2] 소프트웨어 불감대(Deadband) 필터: 3도 미만의 미세한 ADC 노이즈 무시
+        if (abs(incoming_angle - tray_percent) < 3) {
+            return;
+        }
+
+        // [해결 3] 시간 스로틀링(Rate Limiting): ESP-01 Wi-Fi 병목 방지를 위해 최소 150ms 간격 보장
+        static long long last_tray_send_time = 0;
+        long long now = get_current_time_ms();
+        if (now - last_tray_send_time < 150) {
+            return; // 너무 빠르게 유입된 연속 패킷 드롭
+        }
+        last_tray_send_time = now;
+
+        tray_percent = incoming_angle;
 
         char motion_tray[64], web_tray[64];
         snprintf(motion_tray, sizeof(motion_tray), "[%s]TRAY@%d\n", CLIENT_MOTION, tray_percent);
         snprintf(web_tray, sizeof(web_tray), "[%s]TRAY@%d\n", CLIENT_WEB, tray_percent);
         
-        send_to_broker(motion_tray); // STM32 서보모터 구동
+        send_to_broker(motion_tray); // STM32 서보모터 구동 (1회만 전달)
         send_to_broker(web_tray);    // 웹 대시보드 동기화
-        printf("[CTRL] 트레이 각도 동기화: %d도 (From: %s)\n", tray_percent, from_id);
+        printf("[CTRL] 트레이 각도 제어 승인: %d도 (From: %s)\n", tray_percent, from_id);
         return;
     }
 
